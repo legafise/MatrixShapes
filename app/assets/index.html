@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Matrix Shapes</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #label, #hint {
+    position: fixed; left: 4vw; font-family: "Courier New", monospace; color: #3f6;
+    transition: opacity 1.2s; opacity: 0; pointer-events: none;
+  }
+  #label { bottom: 6vh; font-size: 3.2vh; letter-spacing: .3em; }
+  #hint { bottom: 2.5vh; font-size: 2vh; color: #2a5; text-shadow: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="label"></div>
+<div id="hint">◀ ▶ фигура &nbsp;·&nbsp; ▲ ▼ размер &nbsp;·&nbsp; OK — что меняют ▲ ▼: размер / скорость / цвет / режим (летает или стоит)</div>
+<script>
+'use strict';
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0;
+function resize() {
+  // Render at CSS resolution (cheap on weak TV GPUs), canvas is upscaled by CSS.
+  const dpr = window.devicePixelRatio || 1;   // full device resolution -> crisp lines
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  initRain();
+}
+addEventListener('resize', resize);
+
+// ---------- colours ----------
+const PALETTES = [
+  { name: 'зелёный', rgb: [60, 255, 110] },
+  { name: 'бирюзовый', rgb: [40, 230, 255] },
+  { name: 'красный', rgb: [255, 60, 70] },
+  { name: 'белый', rgb: [235, 240, 255] },
+];
+let pal = 0;
+const col = (a) => { const c = PALETTES[pal].rgb; return `rgba(${c[0]},${c[1]},${c[2]},${a})`; };
+
+// ---------- matrix rain ----------
+const GLYPHS = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789ZXCVBNM<>*+=';
+const glyph = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+let rainOn = false, drops = [], rainSize = 16;
+function initRain() {
+  rainSize = Math.max(12, Math.round(H / 38));
+  const n = Math.ceil(W / rainSize);
+  drops = Array.from({ length: n }, () => ({ y: Math.random() * -H, v: 0.4 + Math.random() * 0.9 }));
+}
+function drawRain(dt) {
+  ctx.font = `${rainSize}px monospace`;
+  ctx.textAlign = 'center';
+  for (let i = 0; i < drops.length; i++) {
+    const d = drops[i];
+    const prev = Math.floor(d.y / rainSize);
+    d.y += d.v * rainSize * dt * 9;
+    const cur = Math.floor(d.y / rainSize);
+    if (cur !== prev && d.y > 0) {
+      const x = i * rainSize + rainSize / 2, y = cur * rainSize;
+      ctx.fillStyle = 'rgba(200,255,210,0.55)';
+      ctx.fillText(glyph(), x, y);
+      ctx.fillStyle = col(0.35);
+      ctx.fillText(glyph(), x, y - rainSize);
+    }
+    if (d.y > H + rainSize * 4 && Math.random() < 0.03) { d.y = -Math.random() * H * 0.5; d.v = 0.4 + Math.random() * 0.9; }
+  }
+}
+
+// ---------- 3D helpers ----------
+function rot(p, ax, ay, az) {
+  let [x, y, z] = p, t;
+  let c = Math.cos(ax), s = Math.sin(ax); t = y * c - z * s; z = y * s + z * c; y = t;
+  c = Math.cos(ay); s = Math.sin(ay); t = x * c + z * s; z = -x * s + z * c; x = t;
+  c = Math.cos(az); s = Math.sin(az); t = x * c - y * s; y = x * s + y * c; x = t;
+  return [x, y, z];
+}
+const CUBE_V = [];
+for (let i = 0; i < 8; i++) CUBE_V.push([i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1]);
+const CUBE_E = [];
+for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) { const d = i ^ j; if (d === 1 || d === 2 || d === 4) CUBE_E.push([i, j]); }
+const scaled = (vs, k) => vs.map(v => [v[0] * k, v[1] * k, v[2] * k]);
+
+function polyhedron(verts, edgeLen) {
+  const e = [];
+  for (let i = 0; i < verts.length; i++) for (let j = i + 1; j < verts.length; j++) {
+    const d = Math.hypot(verts[i][0] - verts[j][0], verts[i][1] - verts[j][1], verts[i][2] - verts[j][2]);
+    if (Math.abs(d - edgeLen) < 1e-3) e.push([i, j]);
+  }
+  return e;
+}
+const PHI = (1 + Math.sqrt(5)) / 2;
+const ICO_V = (() => {
+  const v = [];
+  for (const a of [-1, 1]) for (const b of [-1, 1]) { v.push([0, a, b * PHI], [a, b * PHI, 0], [b * PHI, 0, a]); }
+  return scaled(v, 1 / Math.hypot(1, PHI) * 1.25);
+})();
+const ICO_E = polyhedron(ICO_V, 2 / Math.hypot(1, PHI) * 1.25);
+
+// ---------- shapes ----------
+// each frame(t) -> { pts:[[x,y,z]], edges:[[i,j]], ortho?, dots?, glyphs?, noRotate?, rotY? }
+const SHAPES = [
+  { name: 'КУБ', frame() { return { pts: scaled(CUBE_V, 0.95), edges: CUBE_E }; } },
+  { name: 'ТЕССЕРАКТ · 4D', frame(t) {
+      const pts = [];
+      for (let i = 0; i < 16; i++) {
+        let x = i & 1 ? 1 : -1, y = i & 2 ? 1 : -1, z = i & 4 ? 1 : -1, w = i & 8 ? 1 : -1, c, s, q;
+        c = Math.cos(t * 0.7); s = Math.sin(t * 0.7); q = x * c - w * s; w = x * s + w * c; x = q;
+        c = Math.cos(t * 0.45); s = Math.sin(t * 0.45); q = z * c - w * s; w = z * s + w * c; z = q;
+        const k = 1.9 / (3 - w);
+        pts.push([x * k * 0.85, y * k * 0.85, z * k * 0.85]);
+      }
+      const edges = [];
+      for (let i = 0; i < 16; i++) for (let b = 0; b < 4; b++) { const j = i ^ (1 << b); if (j > i) edges.push([i, j]); }
+      return { pts, edges, slow: 0.5 };
+    } },
+  { name: 'КУБ НЕККЕРА · В КАКУЮ СТОРОНУ ОН КРУТИТСЯ?', frame() {
+      return { pts: scaled(CUBE_V, 0.9), edges: CUBE_E, ortho: true, rotY: true, tilt: 0.42 };
+    } },
+  { name: 'СФЕРА ИЗ ТОЧЕК · ВЛЕВО ИЛИ ВПРАВО?', frame() {
+      if (!this.p) {
+        this.p = []; const n = 520, ga = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < n; i++) { const y = 1 - (i / (n - 1)) * 2, r = Math.sqrt(1 - y * y); this.p.push([Math.cos(ga * i) * r * 1.3, y * 1.3, Math.sin(ga * i) * r * 1.3]); }
+      }
+      return { pts: this.p, edges: [], ortho: true, dots: true, rotY: true, tilt: 0.25 };
+    } },
+  { name: 'ИКОСАЭДР', frame() { return { pts: ICO_V, edges: ICO_E }; } },
+  { name: 'КУБ В КУБЕ', frame(t) {
+      const outer = scaled(CUBE_V, 1.15);
+      const inner = CUBE_V.map(v => rot(scaled([v], 0.55)[0], -t * 1.3, -t * 0.9, t * 0.4));
+      const core = CUBE_V.map(v => rot(scaled([v], 0.22)[0], t * 2.1, t * 1.6, 0));
+      return { pts: outer.concat(inner, core), edges: CUBE_E.concat(CUBE_E.map(([a, b]) => [a + 8, b + 8]), CUBE_E.map(([a, b]) => [a + 16, b + 16])) };
+    } },
+  { name: 'ТОР', frame() {
+      if (!this.g) {
+        const U = 28, V = 12, pts = [], edges = [];
+        for (let i = 0; i < U; i++) for (let j = 0; j < V; j++) {
+          const u = i / U * Math.PI * 2, v = j / V * Math.PI * 2, R = 1, r = 0.42;
+          pts.push([(R + r * Math.cos(v)) * Math.cos(u), r * Math.sin(v), (R + r * Math.cos(v)) * Math.sin(u)]);
+          const id = i * V + j; edges.push([id, i * V + (j + 1) % V], [id, ((i + 1) % U) * V + j]);
+        }
+        this.g = { pts, edges };
+      }
+      return this.g;
+    } },
+  { name: 'ТОННЕЛЬ', frame(t) {
+      const N = 16, pts = [], edges = [];
+      for (let i = 0; i < N; i++) {
+        const f = ((i / N) + t * 0.12) % 1;           // 0 far .. 1 near
+        const z = -14 + f * 16.5;
+        const a = z * 0.18 + t * 0.3;
+        for (let k = 0; k < 4; k++) {
+          const ang = a + k * Math.PI / 2 + Math.PI / 4;
+          pts.push([Math.cos(ang) * 1.4, Math.sin(ang) * 1.4, z]);
+        }
+        const b = i * 4;
+        for (let k = 0; k < 4; k++) edges.push([b + k, b + (k + 1) % 4]);
+      }
+      return { pts, edges, noRotate: true, tunnel: true };
+    } },
+  { name: 'СПИРАЛЬ ДНК', frame(t) {
+      const N = 34, pts = [], edges = [];
+      for (let i = 0; i < N; i++) {
+        const y = (i / (N - 1) - 0.5) * 2.3, a = i * 0.42;
+        pts.push([Math.cos(a) * 0.6, y, Math.sin(a) * 0.6], [Math.cos(a + Math.PI) * 0.6, y, Math.sin(a + Math.PI) * 0.6]);
+        const b = i * 2;
+        if (i % 2 === 0) edges.push([b, b + 1]);
+        if (i > 0) edges.push([b - 2, b], [b - 1, b + 1]);
+      }
+      return { pts, edges, rotY: true, tilt: 0.3 };
+    } },
+  { name: 'ПОЛЕ СИМВОЛОВ', frame() {
+      if (!this.p) { this.p = []; const n = 5; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) for (let k = 0; k < n; k++) this.p.push([(i / (n - 1) - .5) * 2.2, (j / (n - 1) - .5) * 2.2, (k / (n - 1) - .5) * 2.2]); }
+      return { pts: this.p, edges: [], glyphOnly: true };
+    } },
+];
+
+// ---------- state ----------
+let shapeIdx = 0, speed = 1, sizeMul = 1, t = 0, shapeT = 0, autoUntil = 0, fade = 1;
+let vGlyph = [];
+const labelEl = document.getElementById('label'), hintEl = document.getElementById('hint');
+let labelTimer = 0;
+function showLabel(text) {
+  labelEl.textContent = text; labelEl.style.opacity = 1;
+  clearTimeout(labelTimer); labelTimer = setTimeout(() => labelEl.style.opacity = 0, 3500);
+}
+function setShape(i, manual) {
+  shapeIdx = (i + SHAPES.length) % SHAPES.length; shapeT = 0; fade = 0;
+  if (manual) save();   // remember the chosen shape; no automatic switching
+  showLabel(SHAPES[shapeIdx].name);
+}
+
+// ---------- keep every edge inside the screen ----------
+function keepOnScreen(P, g, S) {
+  const m = Math.min(W, H) * 0.03;                       // safe margin
+  const pad = (g.glyphs || g.glyphOnly) ? S / 7 : S / 60; // room for vertex glyphs / line width
+  const x0 = m + pad, y0 = m + pad, x1 = W - m - pad, y1 = H - m - pad;
+  if (g.tunnel) {
+    // tunnel frames grow towards the viewer: hide a whole frame once it would touch the border
+    for (let q = 0; q < P.length; q += 4) {
+      let out = false;
+      for (let k = q; k < q + 4; k++) { const p = P[k]; if (p[3] < 0 || p[0] < x0 || p[0] > x1 || p[1] < y0 || p[1] > y1) out = true; }
+      if (out) for (let k = q; k < q + 4; k++) P[k][3] = -1;
+    }
+    return;
+  }
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of P) {
+    if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+    if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
+  }
+  // shrink if the shape is bigger than the screen, then slide it back inside
+  const f = Math.min(1, (x1 - x0) / Math.max(1, maxX - minX), (y1 - y0) / Math.max(1, maxY - minY));
+  const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+  const hw = (maxX - minX) * f / 2, hh = (maxY - minY) * f / 2;
+  const nx = Math.min(Math.max(mx, x0 + hw), x1 - hw);
+  const ny = Math.min(Math.max(my, y0 + hh), y1 - hh);
+  for (const p of P) { p[0] = nx + (p[0] - mx) * f; p[1] = ny + (p[1] - my) * f; }
+}
+
+// ---------- render ----------
+function render(dt) {
+  const sh = SHAPES[shapeIdx];
+  const g = sh.frame.call(sh, t);
+  let S, cx, cy;
+  if (dynamic) {   // flies around the wall
+    S = Math.min(W, H) * 0.24 * sizeMul * (1 + 0.06 * Math.sin(t * 0.5));
+    cx = W / 2 + (Math.sin(t * 0.23) * 0.75 + Math.sin(t * 0.071) * 0.25) * W * 0.30;
+    cy = H / 2 + (Math.sin(t * 0.31) * 0.7 + Math.sin(t * 0.097) * 0.3) * H * 0.24;
+    lastPos = [cx / W, cy / H];
+  } else {         // stays where it was placed with the remote, only rotates
+    S = Math.min(W, H) * 0.24 * sizeMul;
+    cx = posX * W; cy = posY * H;
+  }
+  const sp = g.slow ? g.slow : 1;
+  let ax = t * 0.37 * sp, ay = t * 0.53 * sp, az = t * 0.11 * sp;
+  if (g.rotY) { ax = g.tilt || 0; ay = t * 0.6; az = 0; }
+  const D = 4.2;
+  const P = new Array(g.pts.length);
+  for (let i = 0; i < g.pts.length; i++) {
+    const p = g.noRotate ? g.pts[i] : rot(g.pts[i], ax, ay, az);
+    let k, depth;
+    if (g.ortho) { k = 1; depth = 0.5; }
+    else if (g.tunnel) { const zz = D - p[2]; k = zz > 0.2 ? D / zz : -1; depth = Math.min(1, Math.max(0, (p[2] + 14) / 16)); }
+    else { k = D / (D - p[2]); depth = (p[2] + 1.6) / 3.2; }
+    P[i] = [cx + p[0] * S * k, cy - p[1] * S * k, Math.min(1, Math.max(0, depth)), k];
+  }
+  keepOnScreen(P, g, S);
+  const A = fade;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  // edges grouped into depth buckets -> a few big paths instead of one stroke per edge
+  const NB = g.ortho ? 1 : 4;
+  for (let bi = 0; bi < NB; bi++) buckets[bi].length = 0;
+  for (const [i, j] of g.edges) {
+    const a = P[i], b = P[j];
+    if (a[3] < 0 || b[3] < 0) continue;
+    const bi = NB === 1 ? 0 : Math.min(NB - 1, ((a[2] + b[2]) / 2 * NB) | 0);
+    buckets[bi].push(a, b);
+  }
+  for (let bi = 0; bi < NB; bi++) {
+    const seg = buckets[bi];
+    if (!seg.length) continue;
+    const d = NB === 1 ? 1 : 0.5 + 0.5 * (bi + 0.5) / NB;
+    const lw = Math.max(1, S / 90 * (g.ortho ? 1 : (0.5 + d)));
+    ctx.beginPath();
+    for (let s = 0; s < seg.length; s += 2) { ctx.moveTo(seg[s][0], seg[s][1]); ctx.lineTo(seg[s + 1][0], seg[s + 1][1]); }
+    ctx.strokeStyle = col(d * A); ctx.lineWidth = lw; ctx.stroke();       // core
+  }
+  if (g.dots) {
+    const r = Math.max(1.5, S / 110);
+    ctx.fillStyle = col(0.9 * A);
+    ctx.beginPath();
+    for (const p of P) { ctx.moveTo(p[0] + r, p[1]); ctx.arc(p[0], p[1], r, 0, 6.283); }
+    ctx.fill();
+  }
+  if (g.glyphs || g.glyphOnly) {
+    if (vGlyph.length !== P.length) vGlyph = P.map(glyph);
+    let lastFs = -1;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < P.length; i++) {
+      if (Math.random() < 0.04) vGlyph[i] = glyph();
+      // font sizes snapped to 4 px steps: changing ctx.font is expensive on the TV
+      const p = P[i], fs = Math.round(S / (g.glyphOnly ? 7 : 9) * (0.6 + p[2] * 0.7) / 4) * 4;
+      if (fs !== lastFs) { ctx.font = `bold ${fs}px monospace`; lastFs = fs; }
+      ctx.fillStyle = g.glyphOnly ? col((0.25 + 0.75 * p[2]) * A) : col(A);
+      ctx.fillText(vGlyph[i], p[0], p[1]);
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+const buckets = [[], [], [], []];
+let last = performance.now(), fpsN = 0, fpsT = last;
+function loop(now) {
+  let dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (++fpsN, now - fpsT > 5000) { console.log('FPS ' + (fpsN * 1000 / (now - fpsT)).toFixed(1) + ' ' + SHAPES[shapeIdx].name + ' ' + W + 'x' + H); fpsN = 0; fpsT = now; }
+  t += dt * speed; shapeT += dt;
+  fade = Math.min(1, fade + dt * 0.8);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  render(dt);
+  requestAnimationFrame(loop);
+}
+
+// ---------- remote control ----------
+// OK cycles what ▲ ▼ adjust: size -> speed -> colour -> mode (-> position, static mode only)
+const MODES = ['РАЗМЕР', 'СКОРОСТЬ', 'ЦВЕТ', 'РЕЖИМ', 'ПОЛОЖЕНИЕ'];
+const POS = 4;
+let mode = 0, dynamic = true, posX = 0.5, posY = 0.5, lastPos = [0.5, 0.5];
+function save() { try { localStorage.setItem('ms', JSON.stringify({ sizeMul, speed, pal, shape: shapeIdx, dynamic, posX, posY })); } catch (e) {} }
+const modeName = () => dynamic ? 'ДИНАМИЧЕСКИЙ · фигура летает' : 'СТАТИЧЕСКИЙ · фигура стоит на месте';
+function setDynamic(on) {
+  dynamic = on;
+  if (!on) { [posX, posY] = lastPos; mode = POS; showLabel('СТАТИЧЕСКИЙ · двигайте фигуру стрелками, OK — готово'); }
+  else showLabel(modeName());
+  save();
+}
+function adjust(dir) {
+  if (mode === 0) { sizeMul = Math.min(2.5, Math.max(0.3, sizeMul * (dir > 0 ? 1.15 : 1 / 1.15))); showLabel('РАЗМЕР ' + Math.round(sizeMul * 100) + '%'); }
+  else if (mode === 1) { speed = Math.min(4, Math.max(0.15, speed * (dir > 0 ? 1.25 : 1 / 1.25))); showLabel('СКОРОСТЬ ×' + speed.toFixed(1)); }
+  else if (mode === 2) { pal = (pal + (dir > 0 ? 1 : PALETTES.length - 1)) % PALETTES.length; showLabel('ЦВЕТ: ' + PALETTES[pal].name.toUpperCase()); }
+  else if (mode === 3) { setDynamic(!dynamic); return; }
+  save();
+}
+function move(dx, dy) {
+  const step = 0.02;
+  posX = Math.min(0.97, Math.max(0.03, posX + dx * step));
+  posY = Math.min(0.97, Math.max(0.03, posY + dy * step));
+  showLabel('ПОЛОЖЕНИЕ · OK — готово');
+  save();
+}
+addEventListener('keydown', (e) => {
+  const k = e.key;
+  if (mode === POS && k.startsWith('Arrow')) {
+    move(k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0, k === 'ArrowDown' ? 1 : k === 'ArrowUp' ? -1 : 0);
+  }
+  else if (k === 'ArrowRight') setShape(shapeIdx + 1, true);
+  else if (k === 'ArrowLeft') setShape(shapeIdx - 1, true);
+  else if (k === 'ArrowUp') adjust(1);
+  else if (k === 'ArrowDown') adjust(-1);
+  else if (k === 'Enter' || k === ' ') {
+    if (!e.repeat) {
+      mode = (mode + 1) % MODES.length;
+      if (mode === POS && dynamic) mode = 0;   // position only makes sense in static mode
+      if (mode === POS) showLabel('ПОЛОЖЕНИЕ · двигайте фигуру стрелками');
+      else if (mode === 3) showLabel('▲ ▼ — РЕЖИМ: ' + modeName());
+      else showLabel('▲ ▼ — ' + MODES[mode]);
+    }
+  }
+  else if (k >= '1' && k <= '4') { pal = +k - 1; showLabel('ЦВЕТ: ' + PALETTES[pal].name.toUpperCase()); save(); }
+  else return;
+  e.preventDefault();
+});
+try {
+  const s = JSON.parse(localStorage.getItem('ms') || '{}');
+  if (s.sizeMul) sizeMul = s.sizeMul; if (s.speed) speed = s.speed;
+  if (s.pal >= 0) pal = s.pal % PALETTES.length; if (s.shape >= 0) shapeIdx = s.shape % SHAPES.length;
+  if (s.dynamic === false) dynamic = false; if (s.posX >= 0) { posX = s.posX; posY = s.posY; }
+} catch (e) {}
+
+resize();
+ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+setShape(shapeIdx, false);
+hintEl.style.opacity = 1; setTimeout(() => hintEl.style.opacity = 0, 8000);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

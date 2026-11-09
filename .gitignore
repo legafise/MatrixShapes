@@ -1,0 +1,5 @@
+build/
+*.idsig
+# signing key stays local (keep a backup!) — needed to update the installed app
+*.keystore
+*.jks

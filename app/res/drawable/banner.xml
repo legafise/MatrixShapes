@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp" android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#000000" android:pathData="M0,0h320v180h-320z"/>
+    <group android:translateX="5" android:translateY="35">
+      <path android:strokeColor="#1A7A33" android:strokeWidth="8" android:pathData="M30,40 L70,40 L70,80 L30,80 Z M45,25 L85,25 L85,65 L45,65 Z M30,40 L45,25 M70,40 L85,25 M70,80 L85,65 M30,80 L45,65"/>
+      <path android:strokeColor="#66FF88" android:strokeWidth="2.5" android:pathData="M30,40 L70,40 L70,80 L30,80 Z M45,25 L85,25 L85,65 L45,65 Z M30,40 L45,25 M70,40 L85,25 M70,80 L85,65 M30,80 L45,65"/>
+    </group>
+    <group android:translateX="105" android:translateY="20" android:scaleX="1.6" android:scaleY="1.6">
+      <path android:strokeColor="#1A7A33" android:strokeWidth="5" android:pathData="M30,40 L70,40 L70,80 L30,80 Z M45,25 L85,25 L85,65 L45,65 Z M30,40 L45,25 M70,40 L85,25 M70,80 L85,65 M30,80 L45,65"/>
+      <path android:strokeColor="#CCFFDD" android:strokeWidth="1.5" android:pathData="M30,40 L70,40 L70,80 L30,80 Z M45,25 L85,25 L85,65 L45,65 Z M30,40 L45,25 M70,40 L85,25 M70,80 L85,65 M30,80 L45,65"/>
+    </group>
+    <path android:strokeColor="#33FF66" android:strokeWidth="2" android:pathData="M255,30 L300,60 L280,120 L240,110 Z M255,30 L280,120 M300,60 L240,110"/>
+</vector>
